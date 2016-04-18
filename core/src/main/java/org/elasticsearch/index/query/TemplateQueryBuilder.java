@@ -56,8 +56,6 @@ public class TemplateQueryBuilder extends AbstractQueryBuilder<TemplateQueryBuil
     /** Template to fill. */
     private final Template template;
 
-    public static final TemplateQueryBuilder PROTOTYPE = new TemplateQueryBuilder(new Template("proto"));
-
     /**
      * @param template
      *            the template to use for that query.
@@ -99,6 +97,19 @@ public class TemplateQueryBuilder extends AbstractQueryBuilder<TemplateQueryBuil
         this(new Template(template, templateType, null, null, vars));
     }
 
+    /**
+     * Read from a stream.
+     */
+    public TemplateQueryBuilder(StreamInput in) throws IOException {
+        super(in);
+        template = Template.readTemplate(in);
+    }
+
+    @Override
+    protected void doWriteTo(StreamOutput out) throws IOException {
+        template.writeTo(out);
+    }
+
     @Override
     protected void doXContent(XContentBuilder builder, Params builderParams) throws IOException {
         builder.field(TemplateQueryBuilder.NAME);
@@ -111,7 +122,7 @@ public class TemplateQueryBuilder extends AbstractQueryBuilder<TemplateQueryBuil
      */
     public static TemplateQueryBuilder fromXContent(QueryParseContext parseContext) throws IOException {
         XContentParser parser = parseContext.parser();
-        Template template = parse(parser, parseContext.parseFieldMatcher());
+        Template template = parse(parser, parseContext.getParseFieldMatcher());
         return new TemplateQueryBuilder(template);
     }
 
@@ -152,17 +163,6 @@ public class TemplateQueryBuilder extends AbstractQueryBuilder<TemplateQueryBuil
     }
 
     @Override
-    protected TemplateQueryBuilder doReadFrom(StreamInput in) throws IOException {
-        TemplateQueryBuilder templateQueryBuilder = new TemplateQueryBuilder(Template.readTemplate(in));
-        return templateQueryBuilder;
-    }
-
-    @Override
-    protected void doWriteTo(StreamOutput out) throws IOException {
-        template.writeTo(out);
-    }
-
-    @Override
     protected int doHashCode() {
         return Objects.hash(template);
     }
@@ -177,9 +177,8 @@ public class TemplateQueryBuilder extends AbstractQueryBuilder<TemplateQueryBuil
         ExecutableScript executable = queryRewriteContext.getScriptService().executable(template,
             ScriptContext.Standard.SEARCH, Collections.emptyMap());
         BytesReference querySource = (BytesReference) executable.run();
-        final QueryParseContext queryParseContext = queryRewriteContext.newParseContext();
         try (XContentParser qSourceParser = XContentFactory.xContent(querySource).createParser(querySource)) {
-            queryParseContext.reset(qSourceParser);
+            final QueryParseContext queryParseContext = queryRewriteContext.newParseContext(qSourceParser);
             final QueryBuilder<?> queryBuilder = queryParseContext.parseInnerQueryBuilder();
             if (boost() != DEFAULT_BOOST || queryName() != null) {
                 final BoolQueryBuilder boolQueryBuilder = new BoolQueryBuilder();

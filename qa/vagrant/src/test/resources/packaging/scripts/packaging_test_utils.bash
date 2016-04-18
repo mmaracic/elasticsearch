@@ -165,16 +165,19 @@ assert_file() {
 
     if [ "x$user" != "x" ]; then
         realuser=$(find "$file" -maxdepth 0 -printf "%u")
+        echo "Expected user: $user, found $realuser"
         [ "$realuser" = "$user" ]
     fi
 
     if [ "x$group" != "x" ]; then
         realgroup=$(find "$file" -maxdepth 0 -printf "%g")
+        echo "Expected group: $group, found $realgroup"
         [ "$realgroup" = "$group" ]
     fi
 
     if [ "x$privileges" != "x" ]; then
         realprivileges=$(find "$file" -maxdepth 0 -printf "%m")
+        echo "Expected privileges: $privileges, found $realprivileges"
         [ "$realprivileges" = "$privileges" ]
     fi
 }
@@ -348,6 +351,8 @@ run_elasticsearch_service() {
 # This line is attempting to emulate the on login behavior of /usr/share/upstart/sessions/jayatana.conf
 [ -f /usr/share/java/jayatanaag.jar ] && export JAVA_TOOL_OPTIONS="-javaagent:/usr/share/java/jayatanaag.jar"
 # And now we can start Elasticsearch normally, in the background (-d) and with a pidfile (-p).
+export ES_JVM_OPTIONS=$ES_JVM_OPTIONS
+export ES_JAVA_OPTS=$ES_JAVA_OPTS
 $timeoutCommand/tmp/elasticsearch/bin/elasticsearch $background -p /tmp/elasticsearch/elasticsearch.pid $ES_PATH_CONF $commandLineArgs
 BASH
         [ "$status" -eq "$expectedStatus" ]

@@ -82,7 +82,7 @@ public final class InnerHitBuilder extends ToXContentToBytes implements Writeabl
             try {
                 List<ScriptField> scriptFields = new ArrayList<>();
                 for (XContentParser.Token token = p.nextToken(); token != END_OBJECT; token = p.nextToken()) {
-                    scriptFields.add(new ScriptField(p, c));
+                    scriptFields.add(new ScriptField(c));
                 }
                 i.setScriptFields(scriptFields);
             } catch (IOException e) {
@@ -93,7 +93,7 @@ public final class InnerHitBuilder extends ToXContentToBytes implements Writeabl
                 ObjectParser.ValueType.OBJECT_ARRAY);
         PARSER.declareField((p, i, c) -> {
             try {
-                i.setFetchSourceContext(FetchSourceContext.parse(p, c));
+                i.setFetchSourceContext(FetchSourceContext.parse(c));
             } catch (IOException e) {
                 throw new ParsingException(p.getTokenLocation(), "Could not parse inner _source definition", e);
             }
@@ -109,19 +109,11 @@ public final class InnerHitBuilder extends ToXContentToBytes implements Writeabl
         }, SearchSourceBuilder.QUERY_FIELD);
         PARSER.declareObject(InnerHitBuilder::setInnerHitsBuilder, (p, c) -> {
             try {
-                return InnerHitsBuilder.fromXContent(p, c);
+                return InnerHitsBuilder.fromXContent(c);
             } catch (IOException e) {
                 throw new ParsingException(p.getTokenLocation(), "Could not parse inner query definition", e);
             }
         }, SearchSourceBuilder.INNER_HITS_FIELD);
-    }
-
-    public static InnerHitBuilder optionalReadFromStream(StreamInput in) throws IOException {
-        if (in.readBoolean()) {
-            return new InnerHitBuilder(in);
-        } else {
-            return null;
-        }
     }
 
     private String name;
@@ -143,8 +135,13 @@ public final class InnerHitBuilder extends ToXContentToBytes implements Writeabl
     private InnerHitsBuilder innerHitsBuilder;
     private FetchSourceContext fetchSourceContext;
 
-    // pkg protected, because is used in InnerHitsBuilder
-    InnerHitBuilder(StreamInput in) throws IOException {
+    public InnerHitBuilder() {
+    }
+
+    /**
+     * Read from a stream.
+     */
+    public InnerHitBuilder(StreamInput in) throws IOException {
         name = in.readOptionalString();
         nestedPath = in.readOptionalString();
         parentChildType = in.readOptionalString();
@@ -156,9 +153,9 @@ public final class InnerHitBuilder extends ToXContentToBytes implements Writeabl
         fieldNames = (List<String>) in.readGenericValue();
         fieldDataFields = (List<String>) in.readGenericValue();
         if (in.readBoolean()) {
-            scriptFields = in.readList(t -> ScriptField.PROTOTYPE.readFrom(in));
+            scriptFields = in.readList(ScriptField::new);
         }
-        fetchSourceContext = FetchSourceContext.optionalReadFromStream(in);
+        fetchSourceContext = in.readOptionalStreamable(FetchSourceContext::new);
         if (in.readBoolean()) {
             int size = in.readVInt();
             sorts = new ArrayList<>(size);
@@ -171,7 +168,35 @@ public final class InnerHitBuilder extends ToXContentToBytes implements Writeabl
         innerHitsBuilder = in.readOptionalWriteable(InnerHitsBuilder.PROTO::readFrom);
     }
 
-    public InnerHitBuilder() {
+    @Override
+    public void writeTo(StreamOutput out) throws IOException {
+        out.writeOptionalString(name);
+        out.writeOptionalString(nestedPath);
+        out.writeOptionalString(parentChildType);
+        out.writeVInt(from);
+        out.writeVInt(size);
+        out.writeBoolean(explain);
+        out.writeBoolean(version);
+        out.writeBoolean(trackScores);
+        out.writeGenericValue(fieldNames);
+        out.writeGenericValue(fieldDataFields);
+        boolean hasScriptFields = scriptFields != null;
+        out.writeBoolean(hasScriptFields);
+        if (hasScriptFields) {
+            out.writeList(scriptFields);
+        }
+        out.writeOptionalStreamable(fetchSourceContext);
+        boolean hasSorts = sorts != null;
+        out.writeBoolean(hasSorts);
+        if (hasSorts) {
+            out.writeVInt(sorts.size());
+            for (SortBuilder<?> sort : sorts) {
+                out.writeSortBuilder(sort);
+            }
+        }
+        out.writeOptionalWriteable(highlightBuilder);
+        out.writeQuery(query);
+        out.writeOptionalWriteable(innerHitsBuilder);
     }
 
     public InnerHitBuilder setParentChildType(String parentChildType) {
@@ -461,37 +486,6 @@ public final class InnerHitBuilder extends ToXContentToBytes implements Writeabl
     }
 
     @Override
-    public void writeTo(StreamOutput out) throws IOException {
-        out.writeOptionalString(name);
-        out.writeOptionalString(nestedPath);
-        out.writeOptionalString(parentChildType);
-        out.writeVInt(from);
-        out.writeVInt(size);
-        out.writeBoolean(explain);
-        out.writeBoolean(version);
-        out.writeBoolean(trackScores);
-        out.writeGenericValue(fieldNames);
-        out.writeGenericValue(fieldDataFields);
-        boolean hasScriptFields = scriptFields != null;
-        out.writeBoolean(hasScriptFields);
-        if (hasScriptFields) {
-            out.writeList(scriptFields);
-        }
-        FetchSourceContext.optionalWriteToStream(fetchSourceContext, out);
-        boolean hasSorts = sorts != null;
-        out.writeBoolean(hasSorts);
-        if (hasSorts) {
-            out.writeVInt(sorts.size());
-            for (SortBuilder<?> sort : sorts) {
-                out.writeSortBuilder(sort);
-            }
-        }
-        out.writeOptionalWriteable(highlightBuilder);
-        out.writeQuery(query);
-        out.writeOptionalWriteable(innerHitsBuilder);
-    }
-
-    @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         builder.startObject();
 
@@ -585,8 +579,8 @@ public final class InnerHitBuilder extends ToXContentToBytes implements Writeabl
                 fieldDataFields, scriptFields, fetchSourceContext, sorts, highlightBuilder, query, innerHitsBuilder);
     }
 
-    public static InnerHitBuilder fromXContent(XContentParser parser, QueryParseContext context) throws IOException {
-        return PARSER.parse(parser, new InnerHitBuilder(), context);
+    public static InnerHitBuilder fromXContent(QueryParseContext context) throws IOException {
+        return PARSER.parse(context.parser(), new InnerHitBuilder(), context);
     }
 
 }

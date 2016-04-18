@@ -20,10 +20,8 @@
 package org.elasticsearch.index.query;
 
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.index.IndexOptions;
+import org.apache.lucene.analysis.DelegatingAnalyzerWrapper;
 import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.MultiReader;
 import org.apache.lucene.index.SlowCompositeReaderWrapper;
@@ -52,13 +50,13 @@ import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.common.xcontent.XContentType;
+import org.elasticsearch.index.analysis.FieldNameAnalyzer;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.DocumentMapperForType;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.mapper.ParseContext;
 import org.elasticsearch.index.mapper.ParsedDocument;
 import org.elasticsearch.index.mapper.internal.TypeFieldMapper;
-import org.elasticsearch.index.mapper.internal.UidFieldMapper;
 import org.elasticsearch.index.percolator.PercolatorFieldMapper;
 import org.elasticsearch.index.percolator.PercolatorQueryCache;
 
@@ -72,8 +70,6 @@ public class PercolatorQueryBuilder extends AbstractQueryBuilder<PercolatorQuery
 
     public static final String NAME = "percolator";
     public static final ParseField QUERY_NAME_FIELD = new ParseField(NAME);
-
-    public static final PercolatorQueryBuilder PROTO = new PercolatorQueryBuilder(null, null, null, null, null, null, null, null);
 
     static final ParseField DOCUMENT_FIELD = new ParseField("document");
     private static final ParseField DOCUMENT_TYPE_FIELD = new ParseField("document_type");
@@ -136,17 +132,40 @@ public class PercolatorQueryBuilder extends AbstractQueryBuilder<PercolatorQuery
         this.document = null;
     }
 
-    private PercolatorQueryBuilder(String documentType, BytesReference document, String indexedDocumentIndex, String indexedDocumentType,
-                                   String indexedDocumentId, String indexedDocumentRouting, String indexedDocumentPreference,
-                                   Long indexedDocumentVersion) {
-        this.documentType = documentType;
-        this.document = document;
-        this.indexedDocumentIndex = indexedDocumentIndex;
-        this.indexedDocumentType = indexedDocumentType;
-        this.indexedDocumentId = indexedDocumentId;
-        this.indexedDocumentRouting = indexedDocumentRouting;
-        this.indexedDocumentPreference = indexedDocumentPreference;
-        this.indexedDocumentVersion = indexedDocumentVersion;
+    /**
+     * Read from a stream.
+     */
+    public PercolatorQueryBuilder(StreamInput in) throws IOException {
+        super(in);
+        documentType = in.readString();
+        indexedDocumentIndex = in.readOptionalString();
+        indexedDocumentType = in.readOptionalString();
+        indexedDocumentId = in.readOptionalString();
+        indexedDocumentRouting = in.readOptionalString();
+        indexedDocumentPreference = in.readOptionalString();
+        if (in.readBoolean()) {
+            indexedDocumentVersion = in.readVLong();
+        } else {
+            indexedDocumentVersion = null;
+        }
+        document = in.readOptionalBytesReference();
+    }
+
+    @Override
+    protected void doWriteTo(StreamOutput out) throws IOException {
+        out.writeString(documentType);
+        out.writeOptionalString(indexedDocumentIndex);
+        out.writeOptionalString(indexedDocumentType);
+        out.writeOptionalString(indexedDocumentId);
+        out.writeOptionalString(indexedDocumentRouting);
+        out.writeOptionalString(indexedDocumentPreference);
+        if (indexedDocumentVersion != null) {
+            out.writeBoolean(true);
+            out.writeVLong(indexedDocumentVersion);
+        } else {
+            out.writeBoolean(false);
+        }
+        out.writeOptionalBytesReference(document);
     }
 
     @Override
@@ -158,10 +177,11 @@ public class PercolatorQueryBuilder extends AbstractQueryBuilder<PercolatorQuery
             if (contentType == builder.contentType()) {
                 builder.rawField(DOCUMENT_FIELD.getPreferredName(), document);
             } else {
-                XContentParser parser = XContentFactory.xContent(contentType).createParser(document);
-                parser.nextToken();
-                builder.field(DOCUMENT_FIELD.getPreferredName());
-                builder.copyCurrentStructure(parser);
+                try (XContentParser parser = XContentFactory.xContent(contentType).createParser(document)) {
+                    parser.nextToken();
+                    builder.field(DOCUMENT_FIELD.getPreferredName());
+                    builder.copyCurrentStructure(parser);
+                }
             }
         }
         if (indexedDocumentIndex != null || indexedDocumentType != null || indexedDocumentId != null) {
@@ -211,7 +231,7 @@ public class PercolatorQueryBuilder extends AbstractQueryBuilder<PercolatorQuery
             if (token == XContentParser.Token.FIELD_NAME) {
                 currentFieldName = parser.currentName();
             } else if (token == XContentParser.Token.START_OBJECT) {
-                if (parseContext.parseFieldMatcher().match(currentFieldName, DOCUMENT_FIELD)) {
+                if (parseContext.getParseFieldMatcher().match(currentFieldName, DOCUMENT_FIELD)) {
                     try (XContentBuilder builder = XContentFactory.jsonBuilder()) {
                         builder.copyCurrentStructure(parser);
                         builder.flush();
@@ -222,23 +242,23 @@ public class PercolatorQueryBuilder extends AbstractQueryBuilder<PercolatorQuery
                             "] query does not support [" + token + "]");
                 }
             } else if (token.isValue()) {
-                if (parseContext.parseFieldMatcher().match(currentFieldName, DOCUMENT_TYPE_FIELD)) {
+                if (parseContext.getParseFieldMatcher().match(currentFieldName, DOCUMENT_TYPE_FIELD)) {
                     documentType = parser.text();
-                } else if (parseContext.parseFieldMatcher().match(currentFieldName, INDEXED_DOCUMENT_FIELD_INDEX)) {
+                } else if (parseContext.getParseFieldMatcher().match(currentFieldName, INDEXED_DOCUMENT_FIELD_INDEX)) {
                     indexedDocumentIndex = parser.text();
-                } else if (parseContext.parseFieldMatcher().match(currentFieldName, INDEXED_DOCUMENT_FIELD_TYPE)) {
+                } else if (parseContext.getParseFieldMatcher().match(currentFieldName, INDEXED_DOCUMENT_FIELD_TYPE)) {
                     indexedDocumentType = parser.text();
-                } else if (parseContext.parseFieldMatcher().match(currentFieldName, INDEXED_DOCUMENT_FIELD_ID)) {
+                } else if (parseContext.getParseFieldMatcher().match(currentFieldName, INDEXED_DOCUMENT_FIELD_ID)) {
                     indexedDocumentId = parser.text();
-                } else if (parseContext.parseFieldMatcher().match(currentFieldName, INDEXED_DOCUMENT_FIELD_ROUTING)) {
+                } else if (parseContext.getParseFieldMatcher().match(currentFieldName, INDEXED_DOCUMENT_FIELD_ROUTING)) {
                     indexedDocumentRouting = parser.text();
-                } else if (parseContext.parseFieldMatcher().match(currentFieldName, INDEXED_DOCUMENT_FIELD_PREFERENCE)) {
+                } else if (parseContext.getParseFieldMatcher().match(currentFieldName, INDEXED_DOCUMENT_FIELD_PREFERENCE)) {
                     indexedDocumentPreference = parser.text();
-                } else if (parseContext.parseFieldMatcher().match(currentFieldName, INDEXED_DOCUMENT_FIELD_VERSION)) {
+                } else if (parseContext.getParseFieldMatcher().match(currentFieldName, INDEXED_DOCUMENT_FIELD_VERSION)) {
                     indexedDocumentVersion = parser.longValue();
-                } else if (parseContext.parseFieldMatcher().match(currentFieldName, AbstractQueryBuilder.BOOST_FIELD)) {
+                } else if (parseContext.getParseFieldMatcher().match(currentFieldName, AbstractQueryBuilder.BOOST_FIELD)) {
                     boost = parser.floatValue();
-                } else if (parseContext.parseFieldMatcher().match(currentFieldName, AbstractQueryBuilder.NAME_FIELD)) {
+                } else if (parseContext.getParseFieldMatcher().match(currentFieldName, AbstractQueryBuilder.NAME_FIELD)) {
                     queryName = parser.text();
                 } else {
                     throw new ParsingException(parser.getTokenLocation(), "[" + PercolatorQueryBuilder.NAME +
@@ -267,48 +287,6 @@ public class PercolatorQueryBuilder extends AbstractQueryBuilder<PercolatorQuery
         queryBuilder.queryName(queryName);
         queryBuilder.boost(boost);
         return queryBuilder;
-    }
-
-    @Override
-    protected PercolatorQueryBuilder doReadFrom(StreamInput in) throws IOException {
-        String docType = in.readString();
-        String documentIndex = in.readOptionalString();
-        String documentType = in.readOptionalString();
-        String documentId = in.readOptionalString();
-        String documentRouting = in.readOptionalString();
-        String documentPreference = in.readOptionalString();
-        Long documentVersion = null;
-        if (in.readBoolean()) {
-            documentVersion = in.readVLong();
-        }
-        BytesReference documentSource = null;
-        if (in.readBoolean()) {
-            documentSource = in.readBytesReference();
-        }
-        return new PercolatorQueryBuilder(docType, documentSource, documentIndex, documentType, documentId,
-                documentRouting, documentPreference, documentVersion);
-    }
-
-    @Override
-    protected void doWriteTo(StreamOutput out) throws IOException {
-        out.writeString(documentType);
-        out.writeOptionalString(indexedDocumentIndex);
-        out.writeOptionalString(indexedDocumentType);
-        out.writeOptionalString(indexedDocumentId);
-        out.writeOptionalString(indexedDocumentRouting);
-        out.writeOptionalString(indexedDocumentPreference);
-        if (indexedDocumentVersion != null) {
-            out.writeBoolean(true);
-            out.writeVLong(indexedDocumentVersion);
-        } else {
-            out.writeBoolean(false);
-        }
-        if (document != null) {
-            out.writeBoolean(true);
-            out.writeBytesReference(document);
-        } else {
-            out.writeBoolean(false);
-        }
     }
 
     @Override
@@ -371,16 +349,26 @@ public class PercolatorQueryBuilder extends AbstractQueryBuilder<PercolatorQuery
             .id("_temp_id")
             .type(documentType));
 
-        Analyzer defaultAnalyzer = context.getAnalysisService().defaultIndexAnalyzer();
+        FieldNameAnalyzer fieldNameAnalyzer = (FieldNameAnalyzer) docMapper.mappers().indexAnalyzer();
+        // Need to this custom impl because FieldNameAnalyzer is strict and the percolator sometimes isn't when
+        // 'index.percolator.map_unmapped_fields_as_string' is enabled:
+        Analyzer analyzer = new DelegatingAnalyzerWrapper(Analyzer.PER_FIELD_REUSE_STRATEGY) {
+            @Override
+            protected Analyzer getWrappedAnalyzer(String fieldName) {
+                Analyzer analyzer = fieldNameAnalyzer.analyzers().get(fieldName);
+                if (analyzer != null) {
+                    return analyzer;
+                } else {
+                    return context.getAnalysisService().defaultIndexAnalyzer();
+                }
+            }
+        };
         final IndexSearcher docSearcher;
         if (doc.docs().size() > 1) {
             assert docMapper.hasNestedObjects();
-            docSearcher = createMultiDocumentSearcher(docMapper, defaultAnalyzer, doc);
+            docSearcher = createMultiDocumentSearcher(analyzer, doc);
         } else {
-            // TODO: we may want to bring to MemoryIndex thread local cache back...
-            // but I'm unsure about the real benefits.
-            MemoryIndex memoryIndex = new MemoryIndex(true);
-            indexDoc(docMapper, defaultAnalyzer, doc.rootDoc(), memoryIndex);
+            MemoryIndex memoryIndex = MemoryIndex.fromDocument(doc.rootDoc(), analyzer, true, false);
             docSearcher = memoryIndex.createSearcher();
             docSearcher.setQueryCache(null);
         }
@@ -411,15 +399,14 @@ public class PercolatorQueryBuilder extends AbstractQueryBuilder<PercolatorQuery
         return document;
     }
 
-    private IndexSearcher createMultiDocumentSearcher(DocumentMapper docMapper, Analyzer defaultAnalyzer, ParsedDocument doc) {
+    private IndexSearcher createMultiDocumentSearcher(Analyzer analyzer, ParsedDocument doc) {
         IndexReader[] memoryIndices = new IndexReader[doc.docs().size()];
         List<ParseContext.Document> docs = doc.docs();
         int rootDocIndex = docs.size() - 1;
         assert rootDocIndex > 0;
         for (int i = 0; i < docs.size(); i++) {
             ParseContext.Document d = docs.get(i);
-            MemoryIndex memoryIndex = new MemoryIndex(true);
-            indexDoc(docMapper, defaultAnalyzer, d, memoryIndex);
+            MemoryIndex memoryIndex = MemoryIndex.fromDocument(d, analyzer, true, false);
             memoryIndices[i] = memoryIndex.createSearcher().getIndexReader();
         }
         try {
@@ -440,29 +427,6 @@ public class PercolatorQueryBuilder extends AbstractQueryBuilder<PercolatorQuery
             return slowSearcher;
         } catch (IOException e) {
             throw new ElasticsearchException("Failed to create index for percolator with nested document ", e);
-        }
-    }
-
-    private void indexDoc(DocumentMapper documentMapper, Analyzer defaultAnalyzer, ParseContext.Document document,
-                          MemoryIndex memoryIndex) {
-        for (IndexableField field : document.getFields()) {
-            if (field.fieldType().indexOptions() == IndexOptions.NONE && field.name().equals(UidFieldMapper.NAME)) {
-                continue;
-            }
-
-            Analyzer analyzer = defaultAnalyzer;
-            if (documentMapper != null && documentMapper.mappers().getMapper(field.name()) != null) {
-                analyzer =  documentMapper.mappers().indexAnalyzer();
-            }
-            try {
-                try (TokenStream tokenStream = field.tokenStream(analyzer, null)) {
-                    if (tokenStream != null) {
-                        memoryIndex.addField(field.name(), tokenStream, field.boost());
-                    }
-                }
-            } catch (IOException e) {
-                throw new ElasticsearchException("Failed to create token stream", e);
-            }
         }
     }
 

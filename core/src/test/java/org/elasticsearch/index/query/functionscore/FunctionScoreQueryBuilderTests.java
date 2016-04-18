@@ -35,7 +35,6 @@ import org.elasticsearch.common.lucene.search.function.FiltersFunctionScoreQuery
 import org.elasticsearch.common.lucene.search.function.FunctionScoreQuery;
 import org.elasticsearch.common.lucene.search.function.WeightFactorFunction;
 import org.elasticsearch.common.unit.DistanceUnit;
-import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.query.AbstractQueryBuilder;
 import org.elasticsearch.index.query.AbstractQueryTestCase;
@@ -78,8 +77,8 @@ import static org.hamcrest.Matchers.nullValue;
 public class FunctionScoreQueryBuilderTests extends AbstractQueryTestCase<FunctionScoreQueryBuilder> {
     @BeforeClass
     public static void registerTestRandomScoreFunction() {
-        getSearchModule().registerScoreFunction(RandomScoreFunctionBuilderWithFixedSeed::fromXContent,
-                RandomScoreFunctionBuilderWithFixedSeed::new, RandomScoreFunctionBuilderWithFixedSeed.FUNCTION_NAME_FIELD);
+        getSearchModule().registerScoreFunction(RandomScoreFunctionBuilderWithFixedSeed::new,
+                RandomScoreFunctionBuilderWithFixedSeed::fromXContent, RandomScoreFunctionBuilderWithFixedSeed.FUNCTION_NAME_FIELD);
     }
 
     @Override
@@ -614,7 +613,7 @@ public class FunctionScoreQueryBuilderTests extends AbstractQueryTestCase<Functi
     public void testRewrite() throws IOException {
         FunctionScoreQueryBuilder functionScoreQueryBuilder = new FunctionScoreQueryBuilder(
                 new WrapperQueryBuilder(new TermQueryBuilder("foo", "bar").toString()));
-        FunctionScoreQueryBuilder rewrite = (FunctionScoreQueryBuilder) functionScoreQueryBuilder.rewrite(queryShardContext());
+        FunctionScoreQueryBuilder rewrite = (FunctionScoreQueryBuilder) functionScoreQueryBuilder.rewrite(createShardContext());
         assertNotSame(functionScoreQueryBuilder, rewrite);
         assertEquals(rewrite.query(), new TermQueryBuilder("foo", "bar"));
     }
@@ -628,7 +627,7 @@ public class FunctionScoreQueryBuilderTests extends AbstractQueryTestCase<Functi
                 new FunctionScoreQueryBuilder.FilterFunctionBuilder[] {
                         new FunctionScoreQueryBuilder.FilterFunctionBuilder(firstFunction, new RandomScoreFunctionBuilder()),
                         new FunctionScoreQueryBuilder.FilterFunctionBuilder(secondFunction, new RandomScoreFunctionBuilder()) });
-        FunctionScoreQueryBuilder rewrite = (FunctionScoreQueryBuilder) functionScoreQueryBuilder.rewrite(queryShardContext());
+        FunctionScoreQueryBuilder rewrite = (FunctionScoreQueryBuilder) functionScoreQueryBuilder.rewrite(createShardContext());
         assertNotSame(functionScoreQueryBuilder, rewrite);
         assertEquals(rewrite.query(), new TermQueryBuilder("foo", "bar"));
         assertEquals(rewrite.filterFunctionBuilders()[0].getFilter(), new TermQueryBuilder("tq", "1"));
@@ -725,9 +724,9 @@ public class FunctionScoreQueryBuilderTests extends AbstractQueryTestCase<Functi
             return NAME;
         }
 
-        public static RandomScoreFunctionBuilder fromXContent(QueryParseContext parseContext, XContentParser parser)
+        public static RandomScoreFunctionBuilder fromXContent(QueryParseContext parseContext)
                 throws IOException, ParsingException {
-            RandomScoreFunctionBuilder builder = RandomScoreFunctionBuilder.fromXContent(parseContext, parser);
+            RandomScoreFunctionBuilder builder = RandomScoreFunctionBuilder.fromXContent(parseContext);
             RandomScoreFunctionBuilderWithFixedSeed replacement = new RandomScoreFunctionBuilderWithFixedSeed();
             replacement.seed(builder.getSeed());
             return replacement;
