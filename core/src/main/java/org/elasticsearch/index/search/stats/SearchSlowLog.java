@@ -34,7 +34,6 @@ import java.util.concurrent.TimeUnit;
 /**
  */
 public final class SearchSlowLog{
-
     private boolean reformat;
 
     private long queryWarnThreshold;
@@ -159,7 +158,7 @@ public final class SearchSlowLog{
         }
     }
 
-    private static class SlowLogSearchContextPrinter {
+    static class SlowLogSearchContextPrinter {
         private final SearchContext context;
         private final long tookInNanos;
         private final boolean reformat;
@@ -173,6 +172,7 @@ public final class SearchSlowLog{
         @Override
         public String toString() {
             StringBuilder sb = new StringBuilder();
+            sb.append(context.indexShard().indexService().index());
             sb.append("took[").append(TimeValue.timeValueNanos(tookInNanos)).append("], took_millis[").append(TimeUnit.NANOSECONDS.toMillis(tookInNanos)).append("], ");
             if (context.types() == null) {
                 sb.append("types[], ");
